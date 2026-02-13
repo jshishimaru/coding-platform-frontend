@@ -24,4 +24,4 @@ The application will be available at [http://localhost:8080](http://localhost:80
 
 Environment variables can be configured in `.env` files (during development) or passed as build args/runtime vars if configured.
 See `src/config/env.ts` for available configuration options.
-# coding-platform
+
