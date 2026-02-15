@@ -1,22 +1,36 @@
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
-import { RootLayout } from '../layouts/root-layout';
+import { MainLayout } from '@/layouts/MainLayout';
+import { DashboardPage } from '@/features/dashboard/DashboardPage';
+import { QuestionListPage } from '@/features/questions/pages/QuestionListPage';
+import { ContestListPage } from '@/features/contests/pages/ContestListPage';
+import { SandboxPage } from '@/features/sandbox/pages/SandboxPage';
+import { ProfilePage } from '@/features/profile/pages/ProfilePage';
 
 const router = createBrowserRouter([
   {
-    path: '/',
-    element: (
-      <RootLayout>
-        <div>Home</div>
-      </RootLayout>
-    ),
-  },
-  {
-    path: '/login',
-    element: (
-      <RootLayout>
-        <div>Login</div>
-      </RootLayout>
-    ),
+    element: <MainLayout />,
+    children: [
+      {
+        path: '/',
+        element: <DashboardPage />,
+      },
+      {
+        path: '/questions',
+        element: <QuestionListPage />,
+      },
+      {
+        path: '/contests',
+        element: <ContestListPage />,
+      },
+      {
+        path: '/sandbox',
+        element: <SandboxPage />,
+      },
+      {
+        path: '/profile',
+        element: <ProfilePage />,
+      },
+    ],
   },
 ]);
 
