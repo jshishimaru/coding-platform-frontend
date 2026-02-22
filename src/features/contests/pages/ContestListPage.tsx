@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Island } from "@/components/ui/Island";
 import {
   Table,
@@ -14,382 +15,199 @@ import {
   Trophy,
   Clock,
   TrendingUp,
-  Calendar,
-  PlayCircle,
-  Play,
+  Loader2,
+  Users,
+  Zap,
 } from "lucide-react";
-import { Button } from "@/components/ui/Button";
+import { apiClient } from "@/lib/api-client";
 
 /* ─── Types ─── */
 interface Contest {
-  id: string;
-  name: string;
-  startTime: Date;
-  duration: number; // minutes
-  division: "Div 1" | "Div 2" | "Div 3" | "All";
+  id: number;
+  title: string;
+  description: string;
+  start_time: string;
+  end_time: string;
+  is_rated: boolean;
+  status: "upcoming" | "live" | "ended";
   participants: number;
-  registered: boolean;
+  problem_count: number;
 }
-
-interface ActiveContest {
-  name: string;
-  endsAt: Date;
-  rank: number;
-  solved: number;
-  totalProblems: number;
-}
-
-/* ─── Sample Data ─── */
-const activeContest: ActiveContest | null = {
-  name: "ByteCode Weekly #128",
-  endsAt: new Date(Date.now() + 3600000 * 2.5), // 2.5 hours from now
-  rank: 142,
-  solved: 2,
-  totalProblems: 5,
-};
-
-const nextContest = {
-  name: "Global Round #45",
-  startsAt: new Date(Date.now() + 86400000 * 2), // 2 days from now
-  duration: 150,
-  division: "All" as const,
-};
-
-const userPerformance = {
-  currentRating: 1847,
-  lastChange: +42,
-  bestRating: 1923,
-  avgRank: 287,
-  totalContests: 34,
-};
-
-const upcomingContests: Contest[] = [
-  {
-    id: "1",
-    name: "Educational Round #172",
-    startTime: new Date(Date.now() + 86400000 * 1),
-    duration: 120,
-    division: "Div 2",
-    participants: 0,
-    registered: false,
-  },
-  {
-    id: "2",
-    name: "Global Round #45",
-    startTime: new Date(Date.now() + 86400000 * 2),
-    duration: 150,
-    division: "All",
-    participants: 0,
-    registered: true,
-  },
-  {
-    id: "3",
-    name: "Div 3 Round #523",
-    startTime: new Date(Date.now() + 86400000 * 4),
-    duration: 120,
-    division: "Div 3",
-    participants: 0,
-    registered: false,
-  },
-];
-
-const recentContests: Contest[] = [
-  {
-    id: "r1",
-    name: "ByteCode Weekly #127",
-    startTime: new Date(Date.now() - 86400000 * 1),
-    duration: 90,
-    division: "All",
-    participants: 8432,
-    registered: true,
-  },
-  {
-    id: "r2",
-    name: "Educational Round #171",
-    startTime: new Date(Date.now() - 86400000 * 3),
-    duration: 120,
-    division: "Div 2",
-    participants: 12034,
-    registered: true,
-  },
-  {
-    id: "r3",
-    name: "Div 1 + Div 2 Round #912",
-    startTime: new Date(Date.now() - 86400000 * 7),
-    duration: 150,
-    division: "All",
-    participants: 15234,
-    registered: false,
-  },
-];
-
-const virtualContests: Contest[] = [
-  {
-    id: "v1",
-    name: "Global Round #44",
-    startTime: new Date(Date.now() - 86400000 * 14),
-    duration: 150,
-    division: "All",
-    participants: 18234,
-    registered: false,
-  },
-  {
-    id: "v2",
-    name: "April Fools 2025",
-    startTime: new Date(Date.now() - 86400000 * 90),
-    duration: 120,
-    division: "All",
-    participants: 9432,
-    registered: false,
-  },
-];
 
 /* ─── Helpers ─── */
-function formatTimeLeft(date: Date): string {
-  const diff = date.getTime() - Date.now();
+function formatTimeLeft(target: string): string {
+  const diff = new Date(target).getTime() - Date.now();
+  if (diff <= 0) return "ended";
   const hours = Math.floor(diff / 3600000);
   const minutes = Math.floor((diff % 3600000) / 60000);
+  if (hours > 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
   return `${hours}h ${minutes}m`;
 }
 
-function formatDate(date: Date): string {
-  const now = Date.now();
-  const diff = date.getTime() - now;
-  const days = Math.floor(Math.abs(diff) / 86400000);
-  const hours = Math.floor((Math.abs(diff) % 86400000) / 3600000);
-
-  if (diff > 0) {
-    if (days === 0) return `in ${hours}h`;
-    if (days === 1) return `tomorrow`;
-    return `in ${days}d`;
-  } else {
-    if (days === 0) return `${hours}h ago`;
-    if (days === 1) return `yesterday`;
-    return `${days}d ago`;
-  }
+function formatDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
-function getDivisionColor(division: string): string {
-  if (division === "Div 1") return "text-error";
-  if (division === "Div 2") return "text-warning";
-  if (division === "Div 3") return "text-success";
-  return "text-accent";
+function durationMinutes(start: string, end: string): number {
+  return Math.round((new Date(end).getTime() - new Date(start).getTime()) / 60000);
 }
 
-/* ─── Row 1 Panels ─── */
-function ActiveContestPanel() {
-  if (!activeContest) {
-    return (
-      <Island className="h-full">
-        <div className="flex h-full items-center justify-center text-center">
-          <div>
-            <Trophy size={32} className="mx-auto mb-2 text-text-muted" />
-            <p className="text-xs text-text-muted">No active contest</p>
-          </div>
-        </div>
-      </Island>
-    );
-  }
+const STATUS_BADGE: Record<string, string> = {
+  live: "border-green-400/30 bg-green-400/10 text-green-400",
+  upcoming: "border-blue-400/30 bg-blue-400/10 text-blue-400",
+  ended: "border-zinc-400/30 bg-zinc-400/10 text-zinc-400",
+};
 
+function StatusBadge({ status }: { status: string }) {
+  const cls = STATUS_BADGE[status] || STATUS_BADGE.ended;
   return (
-    <Island className="h-full">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
-        Active Contest
-      </h3>
-      <div className="space-y-3">
-        <div>
-          <p className="text-sm font-semibold text-text">{activeContest.name}</p>
-          <div className="mt-1 flex items-center gap-2 text-xs text-text-muted">
-            <Clock size={12} />
-            <span className="font-mono text-warning">{formatTimeLeft(activeContest.endsAt)}</span>
-          </div>
-        </div>
-        <div className="flex items-center justify-between text-sm">
-          <div>
-            <span className="text-text-muted">Rank:</span>{" "}
-            <span className="font-bold text-text">{activeContest.rank}</span>
-          </div>
-          <div>
-            <span className="text-text-muted">Solved:</span>{" "}
-            <span className="font-bold text-accent">
-              {activeContest.solved}/{activeContest.totalProblems}
-            </span>
-          </div>
-        </div>
-        <Button variant="primary" className="w-full text-xs">
-          Continue
-        </Button>
-      </div>
-    </Island>
+    <span className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold capitalize ${cls}`}>
+      {status === "live" ? "● Live" : status}
+    </span>
   );
 }
 
-function NextContestPanel() {
-  return (
-    <Island className="h-full">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
-        Next Contest
-      </h3>
-      <div className="space-y-3">
-        <div>
-          <p className="text-sm font-semibold text-text">{nextContest.name}</p>
-          <div className="mt-1 flex items-center gap-2 text-xs text-text-muted">
-            <Calendar size={12} />
-            <span>{formatDate(nextContest.startsAt)}</span>
-            <span>·</span>
-            <span>{nextContest.duration}min</span>
-          </div>
-        </div>
-        <div className="text-xs">
-          <span
-            className={`font-semibold ${getDivisionColor(nextContest.division)}`}
-          >
-            {nextContest.division}
-          </span>
-        </div>
-        <Button variant="primary" className="w-full text-xs">
-          Register
-        </Button>
-      </div>
-    </Island>
-  );
-}
-
-function PerformancePanel() {
-  return (
-    <Island className="h-full">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
-        Performance
-      </h3>
-      <div className="space-y-2">
-        <div className="flex items-baseline justify-between">
-          <span className="text-xs text-text-muted">Rating</span>
-          <div className="flex items-baseline gap-1">
-            <span className="text-lg font-bold tabular-nums text-text">
-              {userPerformance.currentRating}
-            </span>
-            <span
-              className={`text-xs font-semibold ${
-                userPerformance.lastChange >= 0 ? "text-success" : "text-error"
-              }`}
-            >
-              {userPerformance.lastChange >= 0 ? "+" : ""}
-              {userPerformance.lastChange}
-            </span>
-          </div>
-        </div>
-        <div className="flex items-baseline justify-between text-[11px]">
-          <span className="text-text-muted">Best</span>
-          <span className="font-semibold text-accent">{userPerformance.bestRating}</span>
-        </div>
-        <div className="flex items-baseline justify-between text-[11px]">
-          <span className="text-text-muted">Avg Rank</span>
-          <span className="font-semibold text-text">{userPerformance.avgRank}</span>
-        </div>
-        <div className="flex items-baseline justify-between text-[11px]">
-          <span className="text-text-muted">Total</span>
-          <span className="font-semibold text-text">{userPerformance.totalContests}</span>
-        </div>
-      </div>
-    </Island>
-  );
-}
-
-/* ─── Row 2 Panels ─── */
-function ContestGroupPanel({
-  title,
-  icon,
-  contests,
-}: {
-  title: string;
-  icon: React.ReactNode;
-  contests: Contest[];
-}) {
-  return (
-    <Island className="cursor-pointer transition-transform duration-200 hover:scale-[1.01]">
-      <div className="mb-3 flex items-center gap-2">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-subtle text-accent">
-          {icon}
-        </div>
-        <h3 className="text-sm font-semibold text-text">{title}</h3>
-      </div>
-
-      <div className="space-y-2">
-        {contests.map((contest) => (
-          <div
-            key={contest.id}
-            className="cursor-pointer rounded-lg border border-border bg-bg p-2.5 transition-colors hover:border-accent"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1">
-                <p className="text-xs font-semibold text-text">{contest.name}</p>
-                <div className="mt-1 flex items-center gap-2 text-[10px] text-text-muted">
-                  <span>{formatDate(contest.startTime)}</span>
-                  <span>·</span>
-                  <span>{contest.duration}min</span>
-                  <span>·</span>
-                  <span className={getDivisionColor(contest.division)}>
-                    {contest.division}
-                  </span>
-                </div>
-              </div>
-              {contest.registered && (
-                <span className="text-xs font-medium text-success">✓</span>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </Island>
-  );
-}
-
-/* ─── Main Page ─── */
+/* ─── Page Component ─── */
 export function ContestListPage() {
+  const navigate = useNavigate();
+  const [contests, setContests] = useState<Contest[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState("date");
-  const [divisionFilter, setDivisionFilter] = useState<string>("all");
 
-  const allContests = [...upcomingContests, ...recentContests, ...virtualContests];
+  useEffect(() => {
+    apiClient
+      .get<{ contests: Contest[] }>("/contests")
+      .then((res) => setContests(res.contests || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const liveContests = contests.filter((c) => c.status === "live");
+  const upcomingContests = contests.filter((c) => c.status === "upcoming");
+
+  const filtered = contests
+    .filter((c) => {
+      if (statusFilter !== "all" && c.status !== statusFilter) return false;
+      if (searchQuery && !c.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === "participants") return b.participants - a.participants;
+      if (sortBy === "duration") return durationMinutes(a.start_time, a.end_time) - durationMinutes(b.start_time, b.end_time);
+      return new Date(b.start_time).getTime() - new Date(a.start_time).getTime();
+    });
 
   return (
     <div className="space-y-6">
-      {/* Row 1 — Live Status Panels */}
-      <div className="grid grid-cols-3 gap-6">
-        <ActiveContestPanel />
-        <NextContestPanel />
-        <PerformancePanel />
+      {/* Row 1 — Status Panels */}
+      <div className="grid grid-cols-12 gap-6">
+        {/* Live Contest Panel */}
+        <div className="col-span-5">
+          <Island className="h-full">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
+              Live Contests
+            </h3>
+            {liveContests.length === 0 ? (
+              <div className="flex items-center justify-center py-4">
+                <div className="text-center">
+                  <Trophy size={28} className="mx-auto mb-1 text-text-muted" />
+                  <p className="text-xs text-text-muted">No live contests right now</p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {liveContests.map((c) => (
+                  <div
+                    key={c.id}
+                    onClick={() => navigate(`/contests/${c.id}`)}
+                    className="cursor-pointer rounded-lg border border-green-400/20 bg-green-400/5 p-3 transition-colors hover:border-green-400/40"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-text">{c.title}</p>
+                        <div className="mt-1 flex items-center gap-2 text-[11px] text-text-muted">
+                          <Clock size={10} />
+                          <span className="font-mono text-warning">{formatTimeLeft(c.end_time)} left</span>
+                          <span>·</span>
+                          <span>{c.problem_count} problems</span>
+                        </div>
+                      </div>
+                      <Zap size={16} className="text-green-400 animate-pulse" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Island>
+        </div>
+
+        {/* Upcoming */}
+        <div className="col-span-4">
+          <Island className="h-full">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
+              Upcoming
+            </h3>
+            {upcomingContests.length === 0 ? (
+              <p className="py-4 text-center text-xs text-text-muted">No upcoming contests</p>
+            ) : (
+              <div className="space-y-2">
+                {upcomingContests.slice(0, 3).map((c) => (
+                  <div
+                    key={c.id}
+                    onClick={() => navigate(`/contests/${c.id}`)}
+                    className="cursor-pointer rounded-lg border border-border bg-bg p-2.5 transition-colors hover:border-accent"
+                  >
+                    <p className="text-xs font-semibold text-text">{c.title}</p>
+                    <div className="mt-1 flex items-center gap-2 text-[10px] text-text-muted">
+                      <span>Starts {formatTimeLeft(c.start_time)}</span>
+                      <span>·</span>
+                      <span>{durationMinutes(c.start_time, c.end_time)}min</span>
+                      {c.is_rated && <span className="text-accent">rated</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Island>
+        </div>
+
+        {/* Stats */}
+        <div className="col-span-3">
+          <Island className="h-full">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
+              Overview
+            </h3>
+            <div className="space-y-2">
+              <div className="flex items-baseline justify-between">
+                <span className="text-xs text-text-muted">Total Contests</span>
+                <span className="text-lg font-bold tabular-nums text-text">{contests.length}</span>
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span className="text-xs text-text-muted">Live Now</span>
+                <span className="text-lg font-bold tabular-nums text-green-400">{liveContests.length}</span>
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span className="text-xs text-text-muted">Upcoming</span>
+                <span className="text-lg font-bold tabular-nums text-blue-400">{upcomingContests.length}</span>
+              </div>
+            </div>
+          </Island>
+        </div>
       </div>
 
-      {/* Row 2 — Discovery Panels */}
-      <div className="grid grid-cols-3 gap-6">
-        <ContestGroupPanel
-          title="Upcoming Contests"
-          icon={<Calendar size={18} />}
-          contests={upcomingContests}
-        />
-        <ContestGroupPanel
-          title="Recent Contests"
-          icon={<TrendingUp size={18} />}
-          contests={recentContests}
-        />
-        <ContestGroupPanel
-          title="Virtual Contests"
-          icon={<PlayCircle size={18} />}
-          contests={virtualContests}
-        />
-      </div>
-
-      {/* Row 3 — Main Contest Workspace */}
+      {/* Row 2 — Main Contest Table */}
       <Island>
-        {/* Controls */}
         <div className="mb-4 flex items-center gap-3">
           {/* Search */}
           <div className="relative flex-1">
-            <Search
-              size={16}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted"
-            />
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
             <input
               type="text"
               placeholder="Search contests..."
@@ -399,24 +217,24 @@ export function ContestListPage() {
             />
           </div>
 
-          {/* Division Filter */}
+          {/* Status Filter */}
           <div className="flex gap-1.5">
-            {["all", "Div 1", "Div 2", "Div 3"].map((div) => (
+            {["all", "live", "upcoming", "ended"].map((s) => (
               <button
-                key={div}
-                onClick={() => setDivisionFilter(div)}
-                className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                  divisionFilter === div
+                key={s}
+                onClick={() => setStatusFilter(s)}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-medium capitalize transition-colors ${
+                  statusFilter === s
                     ? "border-accent bg-accent-subtle text-accent"
                     : "border-border bg-bg text-text-muted hover:border-accent hover:text-text"
                 }`}
               >
-                {div === "all" ? "All" : div}
+                {s === "all" ? "All" : s}
               </button>
             ))}
           </div>
 
-          {/* Sort Dropdown */}
+          {/* Sort */}
           <div className="relative">
             <select
               value={sortBy}
@@ -427,65 +245,67 @@ export function ContestListPage() {
               <option value="duration">Sort by Duration</option>
               <option value="participants">Sort by Participants</option>
             </select>
-            <ChevronDown
-              size={12}
-              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-muted"
-            />
+            <ChevronDown size={12} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-muted" />
           </div>
         </div>
 
-        {/* Contest Table */}
+        {/* Table */}
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead>Contest</TableHead>
-              <TableHead className="w-32">Start Time</TableHead>
+              <TableHead className="w-32">Start</TableHead>
               <TableHead className="w-24">Duration</TableHead>
-              <TableHead className="w-24">Division</TableHead>
+              <TableHead className="w-20">Problems</TableHead>
               <TableHead className="w-28">Participants</TableHead>
+              <TableHead className="w-20">Rated</TableHead>
               <TableHead className="w-24 text-center">Status</TableHead>
             </TableRow>
           </TableHeader>
-
           <TableBody>
-            {allContests.map((contest) => (
-              <TableRow key={contest.id} className="cursor-pointer">
-                <TableCell className="font-medium text-sm">{contest.name}</TableCell>
-                <TableCell className="text-xs text-text-muted">
-                  {formatDate(contest.startTime)}
+            {loading && (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-8">
+                  <Loader2 size={20} className="inline animate-spin text-accent" />
                 </TableCell>
-                <TableCell className="text-xs text-text-muted">
-                  {contest.duration}min
+              </TableRow>
+            )}
+            {!loading && filtered.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-8 text-text-muted text-sm">
+                  No contests found
                 </TableCell>
-                <TableCell>
-                  <span
-                    className={`text-xs font-semibold ${getDivisionColor(contest.division)}`}
-                  >
-                    {contest.division}
-                  </span>
-                </TableCell>
+              </TableRow>
+            )}
+            {filtered.map((c) => (
+              <TableRow
+                key={c.id}
+                className="cursor-pointer"
+                onClick={() => navigate(`/contests/${c.id}`)}
+              >
+                <TableCell className="font-medium text-sm">{c.title}</TableCell>
+                <TableCell className="text-xs text-text-muted">{formatDate(c.start_time)}</TableCell>
                 <TableCell className="text-xs text-text-muted">
-                  {contest.participants > 0
-                    ? contest.participants.toLocaleString()
-                    : "—"}
+                  {durationMinutes(c.start_time, c.end_time)}min
+                </TableCell>
+                <TableCell className="text-xs text-text-muted">{c.problem_count}</TableCell>
+                <TableCell className="text-xs text-text-muted">
+                  <div className="flex items-center gap-1">
+                    <Users size={12} />
+                    {c.participants}
+                  </div>
+                </TableCell>
+                <TableCell className="text-xs">
+                  {c.is_rated ? (
+                    <span className="flex items-center gap-1 text-accent">
+                      <TrendingUp size={12} /> Rated
+                    </span>
+                  ) : (
+                    <span className="text-text-muted">Unrated</span>
+                  )}
                 </TableCell>
                 <TableCell className="text-center">
-                  {contest.registered && (
-                    <span className="text-sm font-medium text-success">✓</span>
-                  )}
-                  {!contest.registered &&
-                    contest.startTime.getTime() > Date.now() && (
-                      <button className="text-xs font-medium text-accent hover:underline">
-                        Register
-                      </button>
-                    )}
-                  {!contest.registered &&
-                    contest.startTime.getTime() < Date.now() && (
-                      <button className="flex items-center gap-1 text-xs font-medium text-text-muted hover:text-accent">
-                        <Play size={12} />
-                        Virtual
-                      </button>
-                    )}
+                  <StatusBadge status={c.status} />
                 </TableCell>
               </TableRow>
             ))}

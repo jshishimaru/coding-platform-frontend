@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Island } from "@/components/ui/Island";
 import {
   Table,
@@ -11,150 +12,72 @@ import {
 import {
   Search,
   ChevronDown,
-  TrendingUp,
-  Target,
-  Sparkles,
+  Loader2,
 } from "lucide-react";
+import { apiClient } from "@/lib/api-client";
 
 /* ─── Types ─── */
 interface Question {
-  id: string;
+  id: number;
   title: string;
-  rating: number;
-  tags: string[];
-  solved: boolean;
-  popularity: number;
+  slug: string;
+  difficulty: string;
+  time_limit_ms: number;
+  memory_limit_mb: number;
+  created_at: string;
 }
 
-interface TopicGroup {
-  id: string;
-  title: string;
-  icon: React.ReactNode;
-  tags: { name: string; solved: number; total: number }[];
-}
-
-/* ─── Sample Data ─── */
-const questions: Question[] = [
-  { id: "1", title: "Two Sum", rating: 800, tags: ["Array", "Hash Map"], solved: true, popularity: 98 },
-  { id: "2", title: "Longest Substring Without Repeating Characters", rating: 1400, tags: ["String", "Sliding Window"], solved: false, popularity: 87 },
-  { id: "3", title: "Median of Two Sorted Arrays", rating: 2100, tags: ["Binary Search", "Array"], solved: false, popularity: 72 },
-  { id: "4", title: "Valid Parentheses", rating: 900, tags: ["Stack", "String"], solved: true, popularity: 95 },
-  { id: "5", title: "Merge K Sorted Lists", rating: 1900, tags: ["Linked List", "Heap"], solved: false, popularity: 68 },
-  { id: "6", title: "Container With Most Water", rating: 1300, tags: ["Array", "Two Pointers"], solved: true, popularity: 82 },
-  { id: "7", title: "Trapping Rain Water", rating: 1800, tags: ["Array", "Stack"], solved: false, popularity: 76 },
-  { id: "8", title: "Reverse Linked List", rating: 800, tags: ["Linked List"], solved: true, popularity: 99 },
-];
-
-const topicGroups: TopicGroup[] = [
-  {
-    id: "continue",
-    title: "Continue Learning",
-    icon: <Target size={18} />,
-    tags: [
-      { name: "Array", solved: 12, total: 24 },
-      { name: "String", solved: 8, total: 18 },
-      { name: "Stack", solved: 5, total: 12 },
-      { name: "Two Pointers", solved: 3, total: 8 },
-    ],
-  },
-  {
-    id: "popular",
-    title: "Popular Topics",
-    icon: <TrendingUp size={18} />,
-    tags: [
-      { name: "Hash Map", solved: 6, total: 15 },
-      { name: "Binary Search", solved: 4, total: 14 },
-      { name: "Sliding Window", solved: 5, total: 10 },
-      { name: "DP", solved: 2, total: 22 },
-    ],
-  },
-  {
-    id: "recommended",
-    title: "Recommended For You",
-    icon: <Sparkles size={18} />,
-    tags: [
-      { name: "Linked List", solved: 8, total: 16 },
-      { name: "Tree", solved: 3, total: 19 },
-      { name: "Graph", solved: 1, total: 18 },
-      { name: "Heap", solved: 2, total: 9 },
-    ],
-  },
-];
-
-const userProgress = {
-  solved: 42,
-  total: 387,
-  currentTier: "Specialist",
-  weakestTopic: "Dynamic Programming",
+/* ─── Difficulty Helpers ─── */
+const DIFFICULTY_BG: Record<string, string> = {
+  easy: "border-green-400/30 bg-green-400/10 text-green-400",
+  medium: "border-yellow-400/30 bg-yellow-400/10 text-yellow-400",
+  hard: "border-red-400/30 bg-red-400/10 text-red-400",
 };
 
-/* ─── Difficulty Rating Helpers ─── */
-function getRatingColor(rating: number): string {
-  if (rating < 1100) return "text-success";
-  if (rating < 1500) return "text-warning";
-  if (rating < 2000) return "rgb(255, 140, 60)";
-  return "text-error";
-}
-
-function RatingBadge({ rating }: { rating: number }) {
-  const color = getRatingColor(rating);
+function DifficultyBadge({ difficulty }: { difficulty: string }) {
+  const cls = DIFFICULTY_BG[difficulty] || DIFFICULTY_BG.medium;
   return (
-    <span 
-      className="text-xs font-semibold tabular-nums"
-      style={{ color: color.startsWith("rgb") ? color : undefined }}
-    >
-      {rating}
+    <span className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold capitalize ${cls}`}>
+      {difficulty}
     </span>
   );
 }
 
-/* ─── Topic Group Panel ─── */
-function TopicGroupPanel({ group }: { group: TopicGroup }) {
-  return (
-    <Island className="cursor-pointer transition-transform duration-200 hover:scale-[1.01]">
-      <div className="mb-3 flex items-center gap-2">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-subtle text-accent">
-          {group.icon}
-        </div>
-        <h3 className="text-sm font-semibold text-text">{group.title}</h3>
-      </div>
-      
-      <div className="flex flex-wrap gap-2">
-        {group.tags.map((tag) => {
-          const percentage = Math.round((tag.solved / tag.total) * 100);
-          return (
-            <div
-              key={tag.name}
-              className="group relative cursor-pointer rounded-lg border border-border bg-bg px-3 py-1.5 transition-colors hover:border-accent"
-            >
-              <div className="text-xs font-medium text-text">{tag.name}</div>
-              <div className="mt-0.5 text-[10px] text-text-muted">
-                {tag.solved}/{tag.total} · {percentage}%
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </Island>
-  );
-}
 
-/* ─── Tag Pill ─── */
-function TagPill({ label }: { label: string }) {
-  return (
-    <span className="inline-block rounded bg-bg px-2 py-0.5 text-xs text-text-muted">
-      {label}
-    </span>
-  );
-}
 
 /* ─── Page Component ─── */
 export function QuestionListPage() {
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortBy, setSortBy] = useState("rating");
-  const [ratingFilter, setRatingFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState("id");
+  const [difficultyFilter, setDifficultyFilter] = useState<string>("all");
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const progressPercentage = Math.round((userProgress.solved / userProgress.total) * 100);
+  useEffect(() => {
+    apiClient
+      .get<{ questions: Question[] }>("/questions")
+      .then((res) => setQuestions(res.questions))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filtered = questions
+    .filter((q) => {
+      if (difficultyFilter !== "all" && q.difficulty !== difficultyFilter) return false;
+      if (searchQuery && !q.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === "title") return a.title.localeCompare(b.title);
+      if (sortBy === "difficulty") {
+        const order: Record<string, number> = { easy: 0, medium: 1, hard: 2 };
+        return (order[a.difficulty] ?? 1) - (order[b.difficulty] ?? 1);
+      }
+      return a.id - b.id;
+    });
+
+  const progressPercentage = 0;
 
   return (
     <div className="space-y-6">
@@ -186,17 +109,17 @@ export function QuestionListPage() {
               Difficulty
             </h3>
             <div className="flex flex-wrap gap-1.5">
-              {["all", "800-1000", "1100-1400", "1500-1900", "2000+"].map((range) => (
+              {["all", "easy", "medium", "hard"].map((d) => (
                 <button
-                  key={range}
-                  onClick={() => setRatingFilter(range)}
-                  className={`rounded-lg border px-3 py-1 text-xs font-medium transition-colors ${
-                    ratingFilter === range
+                  key={d}
+                  onClick={() => setDifficultyFilter(d)}
+                  className={`rounded-lg border px-3 py-1 text-xs font-medium capitalize transition-colors ${
+                    difficultyFilter === d
                       ? "border-accent bg-accent-subtle text-accent"
                       : "border-border bg-bg text-text-muted hover:border-accent hover:text-text"
                   }`}
                 >
-                  {range === "all" ? "All" : range}
+                  {d === "all" ? "All" : d}
                 </button>
               ))}
             </div>
@@ -212,8 +135,8 @@ export function QuestionListPage() {
             <div className="space-y-2">
               <div>
                 <div className="flex items-baseline justify-between">
-                  <span className="text-lg font-bold tabular-nums text-text">{userProgress.solved}</span>
-                  <span className="text-xs text-text-muted">/ {userProgress.total}</span>
+                  <span className="text-lg font-bold tabular-nums text-text">{questions.length}</span>
+                  <span className="text-xs text-text-muted">questions</span>
                 </div>
                 <div className="mt-1 h-1 overflow-hidden rounded-full bg-bg">
                   <div 
@@ -222,22 +145,12 @@ export function QuestionListPage() {
                   />
                 </div>
               </div>
-              <div className="flex items-center justify-between text-[10px]">
-                <span className="text-text-muted">Tier: <span className="font-semibold text-accent">{userProgress.currentTier}</span></span>
-              </div>
             </div>
           </Island>
         </div>
       </div>
 
-      {/* Row 2 — Smart Topic Panels */}
-      <div className="grid grid-cols-3 gap-6">
-        {topicGroups.map((group) => (
-          <TopicGroupPanel key={group.id} group={group} />
-        ))}
-      </div>
-
-      {/* Row 3 — Main Question Workspace */}
+      {/* Row 2 — Main Question Workspace */}
       <Island>
         {/* Controls */}
         <div className="mb-4 flex items-center justify-between">
@@ -249,9 +162,9 @@ export function QuestionListPage() {
               onChange={(e) => setSortBy(e.target.value)}
               className="appearance-none rounded-lg border border-border bg-bg py-1.5 pl-3 pr-9 text-xs text-text outline-none transition-colors hover:border-accent focus:border-accent focus:ring-1 focus:ring-accent"
             >
-              <option value="rating">Sort by Rating</option>
-              <option value="popularity">Sort by Popularity</option>
-              <option value="completion">Sort by Status</option>
+              <option value="id">Sort by ID</option>
+              <option value="title">Sort by Title</option>
+              <option value="difficulty">Sort by Difficulty</option>
             </select>
             <ChevronDown size={12} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-muted" />
           </div>
@@ -263,32 +176,36 @@ export function QuestionListPage() {
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-14">#</TableHead>
               <TableHead>Title</TableHead>
-              <TableHead className="w-20">Rating</TableHead>
-              <TableHead>Tags</TableHead>
-              <TableHead className="w-16 text-center">Status</TableHead>
+              <TableHead className="w-24">Difficulty</TableHead>
+              <TableHead className="w-28">Time Limit</TableHead>
+              <TableHead className="w-28">Memory</TableHead>
             </TableRow>
           </TableHeader>
 
           <TableBody>
-            {questions.map((q) => (
-              <TableRow key={q.id} className="cursor-pointer">
+            {loading && (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center py-8">
+                  <Loader2 size={20} className="inline animate-spin text-accent" />
+                </TableCell>
+              </TableRow>
+            )}
+            {!loading && filtered.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center py-8 text-text-muted text-sm">
+                  No questions found
+                </TableCell>
+              </TableRow>
+            )}
+            {filtered.map((q) => (
+              <TableRow key={q.id} className="cursor-pointer" onClick={() => navigate(`/questions/${q.slug}`)}>
                 <TableCell className="font-mono text-xs text-text-muted">{q.id}</TableCell>
                 <TableCell className="font-medium text-sm">{q.title}</TableCell>
                 <TableCell>
-                  <RatingBadge rating={q.rating} />
+                  <DifficultyBadge difficulty={q.difficulty} />
                 </TableCell>
-                <TableCell>
-                  <div className="flex gap-1.5">
-                    {q.tags.slice(0, 2).map((tag) => (
-                      <TagPill key={tag} label={tag} />
-                    ))}
-                  </div>
-                </TableCell>
-                <TableCell className="text-center">
-                  {q.solved && (
-                    <span className="text-sm font-medium text-success">✓</span>
-                  )}
-                </TableCell>
+                <TableCell className="text-xs text-text-muted">{q.time_limit_ms}ms</TableCell>
+                <TableCell className="text-xs text-text-muted">{q.memory_limit_mb}MB</TableCell>
               </TableRow>
             ))}
           </TableBody>

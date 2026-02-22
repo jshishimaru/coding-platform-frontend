@@ -7,9 +7,11 @@ import {
   User,
   Sun,
   Moon,
+  LogOut,
 } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/features/auth/store";
 
 /* ─── Navigation Items ─── */
 interface NavItem {
@@ -58,6 +60,12 @@ function TopNav() {
   const { light, toggle } = useTheme();
   const navigate = useNavigate();
   const [isScrolled, setIsScrolled] = useState(false);
+  const { user, logout } = useAuthStore();
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
+  };
 
   useEffect(() => {
     const handleScroll = () => {
@@ -126,7 +134,7 @@ function TopNav() {
         ))}
       </nav>
 
-      {/* Right — Theme toggle + Profile */}
+      {/* Right — Theme toggle + User + Logout */}
       <div className="flex items-center gap-1">
         <button
           onClick={toggle}
@@ -142,12 +150,24 @@ function TopNav() {
         <button
           onClick={() => navigate("/profile")}
           className={cn(
-            "flex items-center justify-center rounded-lg text-text-muted transition-all duration-200 hover:bg-accent-subtle hover:text-text",
-            isScrolled ? "h-8 w-8" : "h-9 w-9"
+            "flex items-center gap-2 rounded-lg px-2 text-text-muted transition-all duration-200 hover:bg-accent-subtle hover:text-text",
+            isScrolled ? "h-8" : "h-9"
           )}
           aria-label="Profile"
         >
           <User size={18} />
+          {user && <span className="text-sm font-medium text-text">{user.username}</span>}
+        </button>
+
+        <button
+          onClick={handleLogout}
+          className={cn(
+            "flex items-center justify-center rounded-lg text-text-muted transition-all duration-200 hover:bg-red-500/10 hover:text-red-400",
+            isScrolled ? "h-8 w-8" : "h-9 w-9"
+          )}
+          aria-label="Logout"
+        >
+          <LogOut size={18} />
         </button>
       </div>
     </header>
