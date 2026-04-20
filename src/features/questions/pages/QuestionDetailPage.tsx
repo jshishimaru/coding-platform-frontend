@@ -17,6 +17,7 @@ import {
   Clock,
   Loader2,
   ChevronDown,
+  Hourglass,
 } from "lucide-react";
 
 /* ─── Types ─── */
@@ -36,6 +37,7 @@ interface QuestionDetail {
   memory_limit_mb: number;
   created_at: string;
   sample_test_cases: SampleTestCase[];
+  problem_type?: "standard" | "subjective";
 }
 
 interface TestCaseResult {
@@ -104,6 +106,7 @@ export function QuestionDetailPage() {
   const [judgeResult, setJudgeResult] = useState<JudgeResult | null>(null);
   const [selectedTC, setSelectedTC] = useState(0);
   const [resultTab, setResultTab] = useState<"results" | "compile">("results");
+  const [pendingReview, setPendingReview] = useState(false);
 
   // Fetch question
   useEffect(() => {
@@ -150,15 +153,23 @@ export function QuestionDetailPage() {
     if (!slug) return;
     setIsSubmitting(true);
     setJudgeResult(null);
+    setPendingReview(false);
     setResultTab("results");
     try {
-      const res = await apiClient.post<{ result: JudgeResult }>("/submissions", {
+      const res = await apiClient.post<{
+        result?: JudgeResult;
+        submission: { status: string };
+      }>("/submissions", {
         problem_slug: slug,
         code,
         language: "cpp",
       });
-      setJudgeResult(res.result);
-      if (res.result.status === "compilation_error") setResultTab("compile");
+      if (res.result) {
+        setJudgeResult(res.result);
+        if (res.result.status === "compilation_error") setResultTab("compile");
+      } else if (res.submission?.status === "pending_review") {
+        setPendingReview(true);
+      }
     } catch (err: any) {
       setJudgeResult({
         status: "error",
@@ -188,6 +199,7 @@ export function QuestionDetailPage() {
   const StatusIcon = statusCfg?.icon;
   const selectedResult = judgeResult?.test_case_results?.[selectedTC];
   const diffClass = DIFFICULTY_COLORS[question.difficulty] || DIFFICULTY_COLORS.medium;
+  const isSubjective = question.problem_type === "subjective";
 
   return (
     <div className="flex h-[calc(100vh-120px)] flex-col gap-2 overflow-hidden">
@@ -201,16 +213,25 @@ export function QuestionDetailPage() {
           <span className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold capitalize ${diffClass}`}>
             {question.difficulty}
           </span>
+          {isSubjective && (
+            <span className="rounded-md border border-accent/30 bg-accent-subtle px-2 py-0.5 text-[11px] font-semibold text-accent">
+              Manual review
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-text-muted">
-            <Clock size={11} className="mr-1 inline" />
-            {question.time_limit_ms}ms
-          </span>
-          <span className="text-[11px] text-text-muted">
-            <MemoryStick size={11} className="mr-1 inline" />
-            {question.memory_limit_mb}MB
-          </span>
+          {!isSubjective && (
+            <>
+              <span className="text-[11px] text-text-muted">
+                <Clock size={11} className="mr-1 inline" />
+                {question.time_limit_ms}ms
+              </span>
+              <span className="text-[11px] text-text-muted">
+                <MemoryStick size={11} className="mr-1 inline" />
+                {question.memory_limit_mb}MB
+              </span>
+            </>
+          )}
           <div className="relative ml-2">
             <select value="cpp" disabled className="appearance-none rounded-lg border border-border bg-bg py-1 pl-2 pr-7 text-xs text-text opacity-80">
               <option value="cpp">C++17</option>
@@ -226,13 +247,15 @@ export function QuestionDetailPage() {
             </select>
             <ChevronDown size={11} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-text-muted" />
           </div>
-          <Button variant="secondary" size="sm" onClick={handleRun} disabled={busy} className="flex items-center gap-1.5 text-xs">
-            {isRunning ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-            Run
-          </Button>
+          {!isSubjective && (
+            <Button variant="secondary" size="sm" onClick={handleRun} disabled={busy} className="flex items-center gap-1.5 text-xs">
+              {isRunning ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+              Run
+            </Button>
+          )}
           <Button variant="primary" size="sm" onClick={handleSubmit} disabled={busy} className="flex items-center gap-1.5 text-xs">
             {isSubmitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-            Submit
+            {isSubjective ? "Submit for review" : "Submit"}
           </Button>
         </div>
       </div>
@@ -372,9 +395,21 @@ export function QuestionDetailPage() {
                 </div>
               )}
 
-              {!busy && !judgeResult && (
+              {!busy && pendingReview && (
+                <div className="flex items-center gap-2 rounded-lg border border-accent/30 bg-accent-subtle p-3 text-sm text-accent">
+                  <Hourglass size={16} />
+                  <span className="font-semibold">Submission received — awaiting manual review</span>
+                  <span className="text-xs text-text-muted">
+                    An instructor will grade this submission and provide feedback.
+                  </span>
+                </div>
+              )}
+
+              {!busy && !judgeResult && !pendingReview && (
                 <div className="py-4 text-center text-sm text-text-muted">
-                  Click Run to test with sample cases, or Submit to judge against all test cases.
+                  {isSubjective
+                    ? "This is a subjective problem — submit your solution for manual review by an instructor."
+                    : "Click Run to test with sample cases, or Submit to judge against all test cases."}
                 </div>
               )}
 

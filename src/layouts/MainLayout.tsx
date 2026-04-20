@@ -8,6 +8,8 @@ import {
   Sun,
   Moon,
   LogOut,
+  UsersRound,
+  ClipboardCheck,
 } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -24,6 +26,8 @@ const navItems: NavItem[] = [
   { label: "Dashboard", to: "/", icon: <LayoutDashboard size={18} /> },
   { label: "Questions", to: "/questions", icon: <FileText size={18} /> },
   { label: "Contests", to: "/contests", icon: <Trophy size={18} /> },
+  { label: "Groups", to: "/groups", icon: <UsersRound size={18} /> },
+  { label: "Submissions", to: "/submissions", icon: <ClipboardCheck size={18} /> },
   { label: "Sandbox", to: "/sandbox", icon: <Terminal size={18} /> },
 ];
 

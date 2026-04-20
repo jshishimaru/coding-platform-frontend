@@ -44,6 +44,14 @@ export const apiClient = {
     });
     return handleResponse<T>(response);
   },
+  patch: async <T>(path: string, body?: unknown): Promise<T> => {
+    const response = await fetch(`${API_URL}${path}`, {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return handleResponse<T>(response);
+  },
   delete: async <T>(path: string): Promise<T> => {
     const response = await fetch(`${API_URL}${path}`, {
       method: 'DELETE',
@@ -52,3 +60,14 @@ export const apiClient = {
     return handleResponse<T>(response);
   },
 };
+
+export function buildQueryString(params: Record<string, unknown>): string {
+  const entries = Object.entries(params).filter(
+    ([, v]) => v !== undefined && v !== null && v !== '',
+  );
+  if (entries.length === 0) return '';
+  const qs = entries
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+    .join('&');
+  return `?${qs}`;
+}

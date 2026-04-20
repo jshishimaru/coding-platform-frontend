@@ -18,6 +18,8 @@ import {
   Loader2,
   Users,
   Zap,
+  Lock,
+  Eye,
 } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 
@@ -32,6 +34,10 @@ interface Contest {
   status: "upcoming" | "live" | "ended";
   participants: number;
   problem_count: number;
+  group_id?: number | null;
+  group_name?: string;
+  proctored?: boolean;
+  grade_visibility?: "private" | "group";
 }
 
 /* ─── Helpers ─── */
@@ -283,7 +289,32 @@ export function ContestListPage() {
                 className="cursor-pointer"
                 onClick={() => navigate(`/contests/${c.id}`)}
               >
-                <TableCell className="font-medium text-sm">{c.title}</TableCell>
+                <TableCell className="text-sm font-medium">
+                  <div className="flex items-center gap-2">
+                    <span>{c.title}</span>
+                    {c.group_id && c.group_name && (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent-subtle px-2 py-0.5 text-[10px] font-medium text-accent">
+                        <Users size={10} /> {c.group_name}
+                      </span>
+                    )}
+                    {c.proctored && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning"
+                        title="This contest is proctored"
+                      >
+                        <Eye size={10} /> Proctored
+                      </span>
+                    )}
+                    {c.grade_visibility === "private" && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-[10px] font-medium text-text-muted"
+                        title="Grades are private"
+                      >
+                        <Lock size={10} /> Private
+                      </span>
+                    )}
+                  </div>
+                </TableCell>
                 <TableCell className="text-xs text-text-muted">{formatDate(c.start_time)}</TableCell>
                 <TableCell className="text-xs text-text-muted">
                   {durationMinutes(c.start_time, c.end_time)}min

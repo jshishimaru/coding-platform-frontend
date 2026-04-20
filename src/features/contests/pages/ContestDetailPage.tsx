@@ -19,7 +19,13 @@ import {
   XCircle,
   ArrowLeft,
   ExternalLink,
+  Users,
+  Eye,
+  Lock,
+  Hourglass,
 } from "lucide-react";
+import { useProctoring } from "@/features/proctoring/useProctoring";
+import { ProctoringBanner } from "@/features/proctoring/ProctoringBanner";
 import { Button } from "@/components/ui/Button";
 import { apiClient } from "@/lib/api-client";
 import { API_URL } from "@/config/env";
@@ -35,6 +41,8 @@ interface ContestProblem {
   difficulty: string;
   time_limit_ms: number;
   memory_limit_mb: number;
+  problem_type?: "standard" | "subjective";
+  scoring_mode?: "all_or_nothing" | "partial";
 }
 
 interface ContestDetail {
@@ -46,6 +54,10 @@ interface ContestDetail {
   is_rated: boolean;
   status: "upcoming" | "live" | "ended";
   problems: ContestProblem[];
+  group_id?: number | null;
+  group_name?: string;
+  proctored?: boolean;
+  grade_visibility?: "private" | "group";
 }
 
 interface LeaderboardSolve {
@@ -110,6 +122,12 @@ export function ContestDetailPage() {
 
   // Countdown
   const [countdown, setCountdown] = useState("");
+
+  // Proctoring
+  const proctoring = useProctoring({
+    contestId: id,
+    enabled: !!contest?.proctored && contest?.status === "live",
+  });
 
   // SSE for rating predictions
   const sseRef = useRef<EventSource | null>(null);
@@ -186,19 +204,26 @@ export function ContestDetailPage() {
     setSubmitResult(null);
     try {
       const res = await apiClient.post<{
-        submission: { status: string; passed_count: number; total_count: number };
-        result: { status: string; passed_count: number; total_count: number };
+        submission: { status: string; passed_count?: number; total_count?: number };
+        result?: { status: string; passed_count: number; total_count: number };
       }>(`/contests/${id}/submit`, {
         problem_id: selectedProblem.problem_id,
         code,
         language: "cpp",
       });
-      setSubmitResult({
-        status: res.result.status,
-        passed: res.result.passed_count,
-        total: res.result.total_count,
-      });
-      // Refresh leaderboard after submission
+      if (res.result) {
+        setSubmitResult({
+          status: res.result.status,
+          passed: res.result.passed_count,
+          total: res.result.total_count,
+        });
+      } else {
+        setSubmitResult({
+          status: res.submission.status,
+          passed: res.submission.passed_count ?? 0,
+          total: res.submission.total_count ?? 0,
+        });
+      }
       fetchLeaderboard();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Submission failed";
@@ -234,7 +259,24 @@ export function ContestDetailPage() {
             <ArrowLeft size={16} />
           </button>
           <div>
-            <h1 className="text-xl font-bold text-text">{contest.title}</h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl font-bold text-text">{contest.title}</h1>
+              {contest.group_id && contest.group_name && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent-subtle px-2 py-0.5 text-[10px] font-medium text-accent">
+                  <Users size={10} /> {contest.group_name}
+                </span>
+              )}
+              {contest.proctored && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
+                  <Eye size={10} /> Proctored
+                </span>
+              )}
+              {contest.grade_visibility === "private" && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-[10px] font-medium text-text-muted">
+                  <Lock size={10} /> Private grades
+                </span>
+              )}
+            </div>
             <p className="text-sm text-text-muted">{contest.description}</p>
           </div>
         </div>
@@ -250,6 +292,17 @@ export function ContestDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Proctoring banner (only while live + proctored) */}
+      {contest.proctored && contest.status === "live" && (
+        <ProctoringBanner
+          isFullscreen={proctoring.isFullscreen}
+          eventCount={proctoring.eventCount}
+          lastEvent={proctoring.lastEvent}
+          onEnterFullscreen={proctoring.requestFullscreen}
+          onExitFullscreen={proctoring.exitFullscreen}
+        />
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-border pb-0">
@@ -331,8 +384,18 @@ export function ContestDetailPage() {
                 <div className="mb-3 flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div>
-                      <h3 className="text-sm font-semibold text-text">
+                      <h3 className="flex items-center gap-2 text-sm font-semibold text-text">
                         {String.fromCharCode(64 + selectedProblem.problem_order)}. {selectedProblem.title}
+                        {selectedProblem.problem_type === "subjective" && (
+                          <span className="rounded-full border border-accent/30 bg-accent-subtle px-2 py-0.5 text-[10px] font-medium text-accent">
+                            Manual review
+                          </span>
+                        )}
+                        {selectedProblem.scoring_mode === "partial" && (
+                          <span className="rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-[10px] font-medium text-text-muted">
+                            Partial scoring
+                          </span>
+                        )}
                       </h3>
                       <p className="text-[11px] text-text-muted">
                         {selectedProblem.points} points · {selectedProblem.time_limit_ms}ms · {selectedProblem.memory_limit_mb}MB
@@ -353,7 +416,9 @@ export function ContestDetailPage() {
                     className="flex items-center gap-2 text-xs"
                   >
                     {submitting ? (
-                      <><Loader2 size={14} className="animate-spin" /> Judging...</>
+                      <><Loader2 size={14} className="animate-spin" /> Submitting...</>
+                    ) : selectedProblem.problem_type === "subjective" ? (
+                      <><Send size={14} /> Submit for review</>
                     ) : (
                       <><Send size={14} /> Submit</>
                     )}
@@ -365,18 +430,28 @@ export function ContestDetailPage() {
                   <div className={`mb-3 rounded-lg border p-3 text-sm ${
                     submitResult.status === "accepted"
                       ? "border-green-400/30 bg-green-400/10 text-green-400"
+                      : submitResult.status === "pending_review"
+                      ? "border-accent/30 bg-accent-subtle text-accent"
                       : "border-red-400/30 bg-red-400/10 text-red-400"
                   }`}>
                     <div className="flex items-center gap-2">
                       {submitResult.status === "accepted" ? (
                         <CheckCircle size={16} />
+                      ) : submitResult.status === "pending_review" ? (
+                        <Hourglass size={16} />
                       ) : (
                         <XCircle size={16} />
                       )}
-                      <span className="font-semibold capitalize">{submitResult.status.replace(/_/g, " ")}</span>
-                      <span className="text-xs">
-                        ({submitResult.passed}/{submitResult.total} passed)
+                      <span className="font-semibold capitalize">
+                        {submitResult.status === "pending_review"
+                          ? "Awaiting manual review"
+                          : submitResult.status.replace(/_/g, " ")}
                       </span>
+                      {submitResult.status !== "pending_review" && submitResult.total > 0 && (
+                        <span className="text-xs">
+                          ({submitResult.passed}/{submitResult.total} passed)
+                        </span>
+                      )}
                     </div>
                   </div>
                 )}
