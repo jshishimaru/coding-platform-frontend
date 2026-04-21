@@ -1,85 +1,135 @@
-import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Island } from "@/components/ui/Island";
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from "@/components/ui/Table";
-import {
-  Code2,
-  Trophy,
-  Zap,
-  Clock,
-  Users,
-  Loader2,
-  FileText,
-} from "lucide-react";
-import { apiClient } from "@/lib/api-client";
+import { Button } from "@/components/ui/Button";
+import { apiClient, buildQueryString } from "@/lib/api-client";
 import { useAuthStore } from "@/features/auth/store";
+import { SubmissionStatusBadge } from "@/features/submissions/components/SubmissionStatusBadge";
+import type { Group, GroupJoinRequest, MySubmissionSummary } from "@/types";
+import {
+  ArrowRight,
+  Clock3,
+  ClipboardCheck,
+  FileText,
+  Loader2,
+  Sparkles,
+  Trophy,
+  Users,
+  Zap,
+} from "lucide-react";
 
-/* ─── Types ─── */
 interface Contest {
   id: number;
   title: string;
+  description?: string;
   start_time: string;
   end_time: string;
   is_rated: boolean;
   status: "upcoming" | "live" | "ended";
   participants: number;
   problem_count: number;
+  group_id?: number | null;
+  group_name?: string;
 }
 
-interface Question {
-  id: number;
-  title: string;
-  slug: string;
-  difficulty: string;
+interface SubmissionListResponse {
+  data: MySubmissionSummary[];
+  total: number;
+  page: number;
+  pages: number;
 }
 
-/* ─── Helpers ─── */
-function formatTimeLeft(target: string): string {
+function formatTimeUntil(target: string): string {
   const diff = new Date(target).getTime() - Date.now();
-  if (diff <= 0) return "ended";
-  const hours = Math.floor(diff / 3600000);
-  const minutes = Math.floor((diff % 3600000) / 60000);
-  if (hours > 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
-  return `${hours}h ${minutes}m`;
+  if (diff <= 0) return "now";
+  const totalMinutes = Math.floor(diff / 60000);
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 }
 
-const DIFFICULTY_COLOR: Record<string, string> = {
-  easy: "text-green-400",
-  medium: "text-yellow-400",
-  hard: "text-red-400",
-};
+function formatDateTime(value: string): string {
+  return new Date(value).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
-/* ─── Page Component ─── */
+function formatSubmissionScore(submission: MySubmissionSummary): string {
+  if (submission.manual_score != null) return `${submission.manual_score}`;
+  if (submission.total_count > 0) return `${submission.passed_count}/${submission.total_count}`;
+  return "—";
+}
+
 export function DashboardPage() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  const [contests, setContests] = useState<Contest[]>([]);
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    Promise.all([
-      apiClient.get<{ contests: Contest[] }>("/contests").catch(() => ({ contests: [] })),
-      apiClient.get<{ questions: Question[] }>("/questions").catch(() => ({ questions: [] })),
-    ])
-      .then(([c, q]) => {
-        setContests(c.contests || []);
-        setQuestions(q.questions || []);
-      })
-      .finally(() => setLoading(false));
-  }, []);
+  const contestsQuery = useQuery({
+    queryKey: ["dashboard", "contests"],
+    queryFn: () => apiClient.get<{ contests: Contest[] }>("/contests"),
+  });
 
-  const liveContests = contests.filter((c) => c.status === "live");
-  const upcomingContests = contests.filter((c) => c.status === "upcoming");
+  const questionsQuery = useQuery({
+    queryKey: ["dashboard", "questions"],
+    queryFn: () => apiClient.get<{ questions: { id: number }[] }>("/questions"),
+  });
 
-  if (loading) {
+  const submissionsQuery = useQuery({
+    queryKey: ["dashboard", "recent-submissions"],
+    queryFn: async () => {
+      const pages = await Promise.all(
+        [1, 2, 3, 4].map((page) =>
+          apiClient
+            .get<SubmissionListResponse>(`/submissions/mine${buildQueryString({ page })}`)
+            .catch(() => ({ data: [], total: 0, page, pages: 0 })),
+        ),
+      );
+
+      const seen = new Set<number>();
+      const merged = pages
+        .flatMap((page) => page.data)
+        .filter((submission) => {
+          if (seen.has(submission.id)) return false;
+          seen.add(submission.id);
+          return true;
+        });
+
+      return {
+        data: merged,
+        total: pages[0]?.total ?? merged.length,
+        page: 1,
+        pages: pages[0]?.pages ?? 1,
+      };
+    },
+  });
+
+  const groupsQuery = useQuery({
+    queryKey: ["dashboard", "groups"],
+    queryFn: () =>
+      apiClient.get<{ groups: Group[] }>(
+        `/groups${buildQueryString({ member: "me" })}`,
+      ),
+  });
+
+  const joinRequestsQuery = useQuery({
+    queryKey: ["dashboard", "group-requests"],
+    queryFn: () => apiClient.get<{ requests: GroupJoinRequest[] }>("/groups/my-requests"),
+  });
+
+  const isInitialLoading =
+    contestsQuery.isLoading &&
+    questionsQuery.isLoading &&
+    submissionsQuery.isLoading &&
+    groupsQuery.isLoading;
+
+  if (isInitialLoading) {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 size={32} className="animate-spin text-accent" />
@@ -87,147 +137,365 @@ export function DashboardPage() {
     );
   }
 
+  const contests = contestsQuery.data?.contests ?? [];
+  const questions = questionsQuery.data?.questions ?? [];
+  const submissions = submissionsQuery.data?.data ?? [];
+  const groups = groupsQuery.data?.groups ?? [];
+  const joinRequests = joinRequestsQuery.data?.requests ?? [];
+
+  const liveContests = contests.filter((contest) => contest.status === "live");
+  const upcomingContests = contests
+    .filter((contest) => contest.status === "upcoming")
+    .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+  const nextContest = upcomingContests[0] ?? null;
+  const pendingReviewCount = submissions.filter((submission) => submission.status === "pending_review").length;
+  const activeJoinRequests = joinRequests.filter((request) => request.status === "pending").length;
+  const latestSubmission = submissions[0] ?? null;
+
+  const focusDescription = liveContests[0]
+    ? `There ${liveContests.length === 1 ? "is" : "are"} ${liveContests.length} live contest${liveContests.length === 1 ? "" : "s"} right now.`
+    : nextContest
+    ? `Your next visible contest starts in ${formatTimeUntil(nextContest.start_time)}.`
+    : latestSubmission
+    ? `Your latest submission was on ${latestSubmission.problem_title}.`
+    : "Check contests, submissions, and groups from one place.";
+
   return (
-    <div
-      className="grid"
-      style={{ gridTemplateColumns: "repeat(12, 1fr)", gap: "24px" }}
-    >
-      {/* Row 1 — Welcome + Contest Status */}
-      <div className="col-span-7">
-        <Island className="h-full flex flex-col justify-between">
-          <div className="flex items-start gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-accent-subtle">
-              <Code2 size={30} className="text-accent" />
+    <div className="grid grid-cols-12 gap-4 lg:h-[calc(100vh-124px)] lg:grid-rows-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:overflow-hidden">
+      <div className="col-span-12 lg:col-span-8 lg:row-start-1">
+          <Island className="h-full overflow-hidden p-0">
+            <div className="flex h-full flex-col bg-[linear-gradient(135deg,color-mix(in_srgb,var(--accent)_22%,transparent)_0%,transparent_58%)] p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="max-w-2xl">
+                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-accent/25 bg-accent-subtle px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-accent">
+                    <Sparkles size={12} />
+                    Dashboard
+                  </div>
+                  <h1 className="text-2xl font-bold leading-tight text-text xl:text-[1.75rem]">
+                    {user ? `Welcome, ${user.username}` : "Welcome"}
+                  </h1>
+                  <p className="mt-2 max-w-xl text-sm leading-5 text-text-muted">
+                    {focusDescription}
+                  </p>
+                </div>
+
+                <div className="grid min-w-[220px] grid-cols-2 gap-2">
+                  <MetricCard
+                    label="Rating"
+                    value={user?.rating != null ? `${user.rating}` : "—"}
+                    icon={<Zap size={15} />}
+                  />
+                  <MetricCard
+                    label="My groups"
+                    value={`${groups.length}`}
+                    icon={<Users size={15} />}
+                  />
+                  <MetricCard
+                    label="Live contests"
+                    value={`${liveContests.length}`}
+                    icon={<Trophy size={15} />}
+                  />
+                  <MetricCard
+                    label="Problems"
+                    value={`${questions.length}`}
+                    icon={<FileText size={15} />}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-1 flex-wrap content-end gap-2">
+                {liveContests[0] ? (
+                  <Button
+                    onClick={() => navigate(`/contests/${liveContests[0].id}`)}
+                    size="sm"
+                    className="gap-2"
+                  >
+                    Open live contest <ArrowRight size={14} />
+                  </Button>
+                ) : nextContest ? (
+                  <Button
+                    onClick={() => navigate(`/contests/${nextContest.id}`)}
+                    size="sm"
+                    className="gap-2"
+                  >
+                    View next contest <ArrowRight size={14} />
+                  </Button>
+                ) : (
+                  <Button onClick={() => navigate("/questions")} size="sm" className="gap-2">
+                    Browse problems <ArrowRight size={14} />
+                  </Button>
+                )}
+                <Button variant="secondary" size="sm" onClick={() => navigate("/submissions")} className="gap-2">
+                  <ClipboardCheck size={14} /> My submissions
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => navigate("/groups")} className="gap-2">
+                  <Users size={14} /> My groups
+                </Button>
+              </div>
             </div>
-            <div>
-              <h2 className="text-2xl font-bold leading-snug text-text">
-                Welcome back{user ? `, ${user.username}` : ""}
-              </h2>
-              <p className="mt-1 text-sm text-text-muted">
-                Solve problems, compete in contests, and level up your skills.
-              </p>
+          </Island>
+      </div>
+
+      <div className="col-span-12 lg:col-span-4 lg:row-start-1">
+          <Island className="flex h-full flex-col">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-text">Right now</h2>
+              <span className="text-xs text-text-muted">Useful signals</span>
             </div>
-          </div>
-          <div className="flex gap-3 mt-4">
-            <div className="flex items-center gap-1.5 rounded-md bg-bg px-2.5 py-1.5 text-[11px] font-medium text-text-muted">
-              <span className="text-accent"><FileText size={13} /></span>
-              {questions.length} problems available
+
+            <div className="flex flex-1 flex-col gap-2">
+              <ActionRow
+                label="Live contests"
+                value={
+                  liveContests[0]
+                    ? `${liveContests.length} active`
+                    : "None active"
+                }
+                hint={
+                  liveContests[0]
+                    ? `${formatTimeUntil(liveContests[0].end_time)} left in ${liveContests[0].title}`
+                    : "Nothing to join right now"
+                }
+                onClick={() => navigate(liveContests[0] ? `/contests/${liveContests[0].id}` : "/contests")}
+              />
+              <ActionRow
+                label="Next contest"
+                value={nextContest ? formatTimeUntil(nextContest.start_time) : "No upcoming contest"}
+                hint={
+                  nextContest
+                    ? `${nextContest.title} · ${formatDateTime(nextContest.start_time)}`
+                    : "Check back later"
+                }
+                onClick={() => navigate(nextContest ? `/contests/${nextContest.id}` : "/contests")}
+              />
+              <ActionRow
+                label="Recent review queue"
+                value={pendingReviewCount > 0 ? `${pendingReviewCount} awaiting review` : "All caught up"}
+                hint={
+                  latestSubmission
+                    ? `${latestSubmission.problem_title} · ${formatDateTime(latestSubmission.submitted_at)}`
+                    : "No recent submissions yet"
+                }
+                onClick={() => navigate("/submissions")}
+              />
+              <ActionRow
+                label="Group activity"
+                value={
+                  activeJoinRequests > 0
+                    ? `${activeJoinRequests} request${activeJoinRequests === 1 ? "" : "s"} pending`
+                    : `${groups.length} joined`
+                }
+                hint={
+                  groups[0]
+                    ? `Latest group: ${groups[0].name}`
+                    : "Join a group for private contests"
+                }
+                onClick={() => navigate("/groups")}
+              />
             </div>
-            <div className="flex items-center gap-1.5 rounded-md bg-bg px-2.5 py-1.5 text-[11px] font-medium text-text-muted">
-              <span className="text-accent"><Trophy size={13} /></span>
-              {contests.length} total contests
+          </Island>
+      </div>
+
+      <div className="col-span-12 lg:col-span-8 lg:row-start-2 lg:min-h-0">
+          <Island className="flex h-full min-h-0 flex-col">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-text">Recent submissions</h2>
+                <p className="text-xs text-text-muted">What you worked on most recently</p>
+              </div>
+              <button
+                onClick={() => navigate("/submissions")}
+                className="text-xs font-medium text-accent hover:underline"
+              >
+                View all
+              </button>
             </div>
-            {user && (
-              <div className="flex items-center gap-1.5 rounded-md bg-bg px-2.5 py-1.5 text-[11px] font-medium text-text-muted">
-                <span className="text-accent"><Zap size={13} /></span>
-                Rating: {user.rating}
+
+            {submissions.length === 0 ? (
+              <EmptyState
+                title="No submissions yet"
+                description="Your recent work will show up here once you start solving problems."
+                actionLabel="Solve a problem"
+                onAction={() => navigate("/questions")}
+              />
+            ) : (
+              <div className="grid flex-1 auto-rows-fr gap-2 overflow-hidden">
+                {submissions.slice(0, 4).map((submission) => (
+                  <button
+                    key={submission.id}
+                    onClick={() => navigate(`/submissions/${submission.id}`)}
+                    className="flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-bg px-4 py-2.5 text-left transition-colors hover:border-accent"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-sm font-medium text-text">
+                          {submission.problem_title}
+                        </span>
+                        {submission.problem_type === "subjective" && (
+                          <span className="rounded-full border border-accent/30 bg-accent-subtle px-2 py-0.5 text-[10px] font-medium text-accent">
+                            Subjective
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-muted">
+                        <span>{submission.problem_slug}</span>
+                        {submission.contest_title && (
+                          <>
+                            <span>·</span>
+                            <span className="truncate">{submission.contest_title}</span>
+                          </>
+                        )}
+                        <span>·</span>
+                        <span>{formatDateTime(submission.submitted_at)}</span>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <span className="text-xs font-medium text-text">
+                        {formatSubmissionScore(submission)}
+                      </span>
+                      <SubmissionStatusBadge status={submission.status} />
+                    </div>
+                  </button>
+                ))}
               </div>
             )}
-          </div>
-        </Island>
+          </Island>
       </div>
 
-      <div className="col-span-5">
-        <Island className="h-full">
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-text">Live Contests</h3>
-            {liveContests.length > 0 && (
-              <span className="text-xs font-medium uppercase tracking-wide text-green-400">
-                ● {liveContests.length} live
-              </span>
-            )}
-          </div>
-
-          {liveContests.length === 0 ? (
-            <p className="py-4 text-center text-xs text-text-muted">No live contests right now</p>
-          ) : (
-            <div className="space-y-2">
-              {liveContests.slice(0, 2).map((c) => (
-                <div
-                  key={c.id}
-                  onClick={() => navigate(`/contests/${c.id}`)}
-                  className="cursor-pointer rounded-lg border border-green-400/20 bg-green-400/5 p-3 transition-colors hover:border-green-400/40"
-                >
-                  <p className="text-sm font-semibold text-text">{c.title}</p>
-                  <div className="mt-1 flex items-center gap-2 text-[11px] text-text-muted">
-                    <Clock size={10} />
-                    <span className="font-mono text-warning">{formatTimeLeft(c.end_time)} left</span>
-                    <span>·</span>
-                    <Users size={10} />
-                    <span>{c.participants}</span>
-                  </div>
-                </div>
-              ))}
+      <div className="col-span-12 lg:col-span-4 lg:row-start-2 lg:min-h-0">
+          <Island className="flex h-full min-h-0 flex-col">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-text">Groups</h2>
+                <p className="text-xs text-text-muted">Your classrooms and private contest spaces</p>
+              </div>
+              <button
+                onClick={() => navigate("/groups")}
+                className="text-xs font-medium text-accent hover:underline"
+              >
+                Browse
+              </button>
             </div>
-          )}
 
-          {upcomingContests.length > 0 && (
-            <div className="mt-3 border-t border-border pt-3">
-              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-1">Upcoming</p>
-              {upcomingContests.slice(0, 1).map((c) => (
-                <div
-                  key={c.id}
-                  onClick={() => navigate(`/contests/${c.id}`)}
-                  className="cursor-pointer rounded-lg border border-border p-2 text-xs hover:border-accent transition-colors"
-                >
-                  <span className="font-medium text-text">{c.title}</span>
-                  <span className="ml-2 text-text-muted">starts {formatTimeLeft(c.start_time)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Island>
-      </div>
-
-      {/* Row 2 — Recent Problems */}
-      <div className="col-span-12">
-        <Island>
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-text">Problems</h3>
-            <button
-              onClick={() => navigate("/questions")}
-              className="text-xs text-accent hover:underline"
-            >
-              View all →
-            </button>
-          </div>
-
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="w-14">#</TableHead>
-                <TableHead>Title</TableHead>
-                <TableHead className="w-24">Difficulty</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {questions.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={3} className="text-center py-6 text-sm text-text-muted">
-                    No problems yet
-                  </TableCell>
-                </TableRow>
-              ) : (
-                questions.slice(0, 8).map((q) => (
-                  <TableRow
-                    key={q.id}
-                    className="cursor-pointer"
-                    onClick={() => navigate(`/questions/${q.slug}`)}
+            {groups.length === 0 ? (
+              <EmptyState
+                title="No groups joined"
+                description={
+                  activeJoinRequests > 0
+                    ? `${activeJoinRequests} join request${activeJoinRequests === 1 ? "" : "s"} pending review.`
+                    : "Join a group to access class contests, assignments, and private leaderboards."
+                }
+                actionLabel="Explore groups"
+                onAction={() => navigate("/groups")}
+              />
+            ) : (
+              <div className="grid flex-1 auto-rows-fr gap-2 overflow-hidden">
+                {groups.slice(0, 3).map((group) => (
+                  <button
+                    key={group.id}
+                    onClick={() => navigate(`/groups/${group.id}`)}
+                    className="flex w-full items-start justify-between gap-3 rounded-xl border border-border bg-bg px-4 py-2.5 text-left transition-colors hover:border-accent"
                   >
-                    <TableCell className="font-mono text-text-muted text-xs">{q.id}</TableCell>
-                    <TableCell className="font-medium text-sm">{q.title}</TableCell>
-                    <TableCell>
-                      <span className={`text-xs font-medium capitalize ${DIFFICULTY_COLOR[q.difficulty] || "text-text-muted"}`}>
-                        {q.difficulty}
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </Island>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-text">{group.name}</div>
+                      <div className="mt-1 line-clamp-2 text-xs text-text-muted">
+                        {group.description || "No description"}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      {group.my_role && (
+                        <span className="rounded-full bg-accent-subtle px-2 py-0.5 text-[10px] font-semibold uppercase text-accent">
+                          {group.my_role}
+                        </span>
+                      )}
+                      <div className="mt-2 text-[11px] text-text-muted">
+                        {group.member_count ?? 0} members
+                      </div>
+                    </div>
+                  </button>
+                ))}
+                {activeJoinRequests > 0 && (
+                  <div className="rounded-xl border border-warning/25 bg-warning/10 px-4 py-3 text-xs text-warning">
+                    {activeJoinRequests} join request{activeJoinRequests === 1 ? "" : "s"} still pending.
+                  </div>
+                )}
+              </div>
+            )}
+          </Island>
       </div>
+    </div>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-bg/80 px-3 py-2">
+      <div className="flex items-start justify-between gap-2">
+        <span className="min-w-0 text-[10px] uppercase tracking-wide leading-4 text-text-muted">
+          {label}
+        </span>
+        <span className="shrink-0 text-accent">{icon}</span>
+      </div>
+      <div className="mt-1 text-lg font-bold tabular-nums text-text">{value}</div>
+    </div>
+  );
+}
+
+function ActionRow({
+  label,
+  value,
+  hint,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-bg px-4 py-2.5 text-left transition-colors hover:border-accent"
+    >
+      <div className="min-w-0 flex-1">
+        <div className="text-xs uppercase tracking-wide text-text-muted">{label}</div>
+        <div className="mt-1 text-sm font-medium text-text">{value}</div>
+        <div className="mt-1 truncate text-xs text-text-muted">{hint}</div>
+      </div>
+      <ArrowRight size={14} className="shrink-0 text-text-muted" />
+    </button>
+  );
+}
+
+function EmptyState({
+  title,
+  description,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  description: string;
+  actionLabel: string;
+  onAction: () => void;
+}) {
+  return (
+    <div className="rounded-xl border border-dashed border-border bg-bg px-4 py-6 text-center">
+      <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-accent-subtle text-accent">
+        <Clock3 size={16} />
+      </div>
+      <h3 className="mt-2.5 text-sm font-semibold text-text">{title}</h3>
+      <p className="mx-auto mt-1 max-w-md text-sm text-text-muted">{description}</p>
+      <Button onClick={onAction} variant="secondary" size="sm" className="mt-3">
+        {actionLabel}
+      </Button>
     </div>
   );
 }
