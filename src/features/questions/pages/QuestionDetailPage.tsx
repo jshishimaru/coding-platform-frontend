@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import Editor from "@monaco-editor/react";
@@ -38,6 +38,14 @@ interface QuestionDetail {
   created_at: string;
   sample_test_cases: SampleTestCase[];
   problem_type?: "standard" | "subjective";
+}
+
+interface ProblemCodeDraft {
+  problem_id: number;
+  code: string;
+  language: string;
+  updated_at?: string | null;
+  exists: boolean;
 }
 
 interface TestCaseResult {
@@ -90,17 +98,32 @@ int main() {
     return 0;
 }`;
 
+const DRAFT_SAVE_INTERVAL_MS = 3000;
+
+function formatDraftSavedAt(updatedAt: string | null) {
+  if (!updatedAt) return "Not saved";
+  const date = new Date(updatedAt);
+  if (Number.isNaN(date.getTime())) return "Saved";
+  return `Saved ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+}
+
 /* ─── Page Component ─── */
 export function QuestionDetailPage() {
   const { slug, contestId } = useParams<{ slug: string; contestId?: string }>();
   const navigate = useNavigate();
   const editorRef = useRef<any>(null);
+  const codeRef = useRef(CPP_TEMPLATE);
+  const lastSavedCodeRef = useRef(CPP_TEMPLATE);
+  const problemIDRef = useRef<number | undefined>(undefined);
   const isContestMode = Boolean(contestId);
   const backPath = isContestMode ? `/contests/${contestId}` : "/questions";
 
   const [question, setQuestion] = useState<QuestionDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [code, setCode] = useState(CPP_TEMPLATE);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [draftSaveError, setDraftSaveError] = useState(false);
   const [fontSize, setFontSize] = useState(14);
 
   const [isRunning, setIsRunning] = useState(false);
@@ -109,23 +132,102 @@ export function QuestionDetailPage() {
   const [selectedTC, setSelectedTC] = useState(0);
   const [resultTab, setResultTab] = useState<"results" | "compile">("results");
   const [pendingReview, setPendingReview] = useState(false);
+  const problemID = question?.id;
+
+  useEffect(() => {
+    codeRef.current = code;
+  }, [code]);
+
+  useEffect(() => {
+    problemIDRef.current = problemID;
+  }, [problemID]);
 
   // Fetch question
   useEffect(() => {
     if (!slug) return;
+    let cancelled = false;
+
     setLoading(true);
+    setQuestion(null);
+    setCode(CPP_TEMPLATE);
+    codeRef.current = CPP_TEMPLATE;
+    lastSavedCodeRef.current = CPP_TEMPLATE;
+    setLastSavedAt(null);
+    setIsSavingDraft(false);
+    setDraftSaveError(false);
     setJudgeResult(null);
     setPendingReview(false);
     setSelectedTC(0);
     const detailPath = isContestMode
       ? `/contests/${contestId}/problems/${slug}`
       : `/questions/${slug}`;
-    apiClient
-      .get<QuestionDetail>(detailPath)
-      .then((q) => setQuestion(q))
-      .catch(() => navigate(backPath))
-      .finally(() => setLoading(false));
+
+    const loadQuestionAndDraft = async () => {
+      try {
+        const q = await apiClient.get<QuestionDetail>(detailPath);
+        let nextCode = CPP_TEMPLATE;
+        let nextSavedAt: string | null = null;
+
+        try {
+          const draft = await apiClient.get<ProblemCodeDraft>(`/code-drafts/problems/${q.id}`);
+          if (draft.exists) {
+            nextCode = draft.code;
+            nextSavedAt = draft.updated_at ?? null;
+          }
+        } catch {
+          nextCode = CPP_TEMPLATE;
+          nextSavedAt = null;
+        }
+
+        if (cancelled) return;
+        setQuestion(q);
+        setCode(nextCode);
+        codeRef.current = nextCode;
+        lastSavedCodeRef.current = nextCode;
+        setLastSavedAt(nextSavedAt);
+      } catch {
+        if (!cancelled) navigate(backPath);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void loadQuestionAndDraft();
+
+    return () => {
+      cancelled = true;
+    };
   }, [backPath, contestId, isContestMode, slug, navigate]);
+
+  const saveDraft = useCallback(async (nextCode = codeRef.current, force = false) => {
+    const draftProblemID = problemID;
+    if (!draftProblemID) return;
+    if (!force && nextCode === lastSavedCodeRef.current) return;
+
+    setIsSavingDraft(true);
+    setDraftSaveError(false);
+    try {
+      const draft = await apiClient.put<ProblemCodeDraft>(`/code-drafts/problems/${draftProblemID}`, {
+        code: nextCode,
+        language: "cpp",
+      });
+      if (problemIDRef.current !== draftProblemID) return;
+      lastSavedCodeRef.current = nextCode;
+      setLastSavedAt(draft.updated_at ?? new Date().toISOString());
+    } catch {
+      if (problemIDRef.current === draftProblemID) setDraftSaveError(true);
+    } finally {
+      if (problemIDRef.current === draftProblemID) setIsSavingDraft(false);
+    }
+  }, [problemID]);
+
+  useEffect(() => {
+    if (!problemID) return;
+    const intervalID = window.setInterval(() => {
+      void saveDraft();
+    }, DRAFT_SAVE_INTERVAL_MS);
+    return () => window.clearInterval(intervalID);
+  }, [problemID, saveDraft]);
 
   // Run sample tests
   const handleRun = async () => {
@@ -176,6 +278,9 @@ export function QuestionDetailPage() {
         result?: JudgeResult;
         submission: { status: string };
       }>(submitPath, payload);
+      lastSavedCodeRef.current = code;
+      setLastSavedAt(new Date().toISOString());
+      setDraftSaveError(false);
       if (res.result) {
         setJudgeResult(res.result);
         setSelectedTC(0);
@@ -245,6 +350,10 @@ export function QuestionDetailPage() {
               </span>
             </>
           )}
+          <span className={`flex items-center gap-1 whitespace-nowrap text-[11px] ${draftSaveError ? "text-red-400" : "text-text-muted"}`}>
+            {isSavingDraft && <Loader2 size={11} className="animate-spin" />}
+            {isSavingDraft ? "Saving..." : draftSaveError ? "Save failed" : formatDraftSavedAt(lastSavedAt)}
+          </span>
           <div className="relative ml-2">
             <select value="cpp" disabled className="appearance-none rounded-lg border border-border bg-bg py-1 pl-2 pr-7 text-xs text-text opacity-80">
               <option value="cpp">C++17</option>
@@ -344,7 +453,11 @@ export function QuestionDetailPage() {
               height="100%"
               language="cpp"
               value={code}
-              onChange={(v) => setCode(v || "")}
+              onChange={(v) => {
+                const nextCode = v || "";
+                codeRef.current = nextCode;
+                setCode(nextCode);
+              }}
               theme="vs-dark"
               onMount={(editor) => { editorRef.current = editor; }}
               options={{
