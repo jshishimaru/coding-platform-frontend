@@ -13,23 +13,16 @@ import {
   Trophy,
   TrendingUp,
   TrendingDown,
-  Send,
   Loader2,
-  CheckCircle,
-  XCircle,
   ArrowLeft,
-  ExternalLink,
   Users,
   Eye,
   Lock,
-  Hourglass,
 } from "lucide-react";
 import { useProctoring } from "@/features/proctoring/useProctoring";
 import { ProctoringBanner } from "@/features/proctoring/ProctoringBanner";
-import { Button } from "@/components/ui/Button";
 import { apiClient } from "@/lib/api-client";
 import { API_URL } from "@/config/env";
-import Editor from "@monaco-editor/react";
 
 /* ─── Types ─── */
 interface ContestProblem {
@@ -114,12 +107,6 @@ export function ContestDetailPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"problems" | "leaderboard" | "ratings">("problems");
 
-  // Submission state
-  const [selectedProblem, setSelectedProblem] = useState<ContestProblem | null>(null);
-  const [code, setCode] = useState("// Write your C++ solution here\n#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    \n    return 0;\n}\n");
-  const [submitting, setSubmitting] = useState(false);
-  const [submitResult, setSubmitResult] = useState<{ status: string; passed: number; total: number } | null>(null);
-
   // Countdown
   const [countdown, setCountdown] = useState("");
 
@@ -197,41 +184,6 @@ export function ContestDetailPage() {
     const interval = setInterval(fetchLeaderboard, 15000);
     return () => clearInterval(interval);
   }, [contest, fetchLeaderboard]);
-
-  const handleSubmit = async () => {
-    if (!selectedProblem || !id || submitting) return;
-    setSubmitting(true);
-    setSubmitResult(null);
-    try {
-      const res = await apiClient.post<{
-        submission: { status: string; passed_count?: number; total_count?: number };
-        result?: { status: string; passed_count: number; total_count: number };
-      }>(`/contests/${id}/submit`, {
-        problem_id: selectedProblem.problem_id,
-        code,
-        language: "cpp",
-      });
-      if (res.result) {
-        setSubmitResult({
-          status: res.result.status,
-          passed: res.result.passed_count,
-          total: res.result.total_count,
-        });
-      } else {
-        setSubmitResult({
-          status: res.submission.status,
-          passed: res.submission.passed_count ?? 0,
-          total: res.submission.total_count ?? 0,
-        });
-      }
-      fetchLeaderboard();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Submission failed";
-      setSubmitResult({ status: message, passed: 0, total: 0 });
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -323,171 +275,47 @@ export function ContestDetailPage() {
 
       {/* Problems Tab */}
       {activeTab === "problems" && (
-        <div className="grid grid-cols-12 gap-6">
-          {/* Problem list */}
-          <div className={selectedProblem ? "col-span-4" : "col-span-12"}>
-            <Island>
-              <h3 className="mb-3 text-sm font-semibold text-text">Problems</h3>
-              <div className="space-y-2">
-                {contest.problems.map((p) => (
-                  <div
-                    key={p.problem_id}
-                    onClick={() => {
-                      setSelectedProblem(p);
-                      setSubmitResult(null);
-                    }}
-                    className={`cursor-pointer rounded-lg border p-3 transition-colors ${
-                      selectedProblem?.problem_id === p.problem_id
-                        ? "border-accent bg-accent-subtle"
-                        : "border-border bg-bg hover:border-accent"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-mono text-text-muted">
-                          {String.fromCharCode(64 + p.problem_order)}
-                        </span>
-                        <span className="text-sm font-medium text-text">{p.title}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold capitalize ${DIFFICULTY_BG[p.difficulty] || DIFFICULTY_BG.medium}`}>
-                          {p.difficulty}
-                        </span>
-                        <span className="text-xs font-bold text-accent">{p.points}pt</span>
-                      </div>
-                    </div>
-                    <div className="mt-1 flex items-center justify-between">
-                      <span className="text-[10px] text-text-muted">
-                        {p.time_limit_ms}ms · {p.memory_limit_mb}MB
+        <Island>
+          <h3 className="mb-3 text-sm font-semibold text-text">Problems</h3>
+          <div className="space-y-2">
+            {contest.problems.map((p) => (
+              <button
+                key={p.problem_id}
+                type="button"
+                onClick={() => navigate(`/contests/${contest.id}/problems/${p.slug}`)}
+                className="w-full rounded-lg border border-border bg-bg p-3 text-left transition-colors hover:border-accent hover:bg-accent-subtle"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="shrink-0 text-xs font-mono text-text-muted">
+                      {String.fromCharCode(64 + p.problem_order)}
+                    </span>
+                    <span className="truncate text-sm font-medium text-text">{p.title}</span>
+                    {p.problem_type === "subjective" && (
+                      <span className="shrink-0 rounded-full border border-accent/30 bg-accent-subtle px-2 py-0.5 text-[10px] font-medium text-accent">
+                        Manual review
                       </span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigate(`/questions/${p.slug}`);
-                        }}
-                        className="flex items-center gap-1 text-[10px] text-accent hover:underline"
-                      >
-                        <ExternalLink size={10} />
-                        View Problem
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Island>
-          </div>
-
-          {/* Code Editor */}
-          {selectedProblem && contest.status === "live" && (
-            <div className="col-span-8">
-              <Island>
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div>
-                      <h3 className="flex items-center gap-2 text-sm font-semibold text-text">
-                        {String.fromCharCode(64 + selectedProblem.problem_order)}. {selectedProblem.title}
-                        {selectedProblem.problem_type === "subjective" && (
-                          <span className="rounded-full border border-accent/30 bg-accent-subtle px-2 py-0.5 text-[10px] font-medium text-accent">
-                            Manual review
-                          </span>
-                        )}
-                        {selectedProblem.scoring_mode === "partial" && (
-                          <span className="rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-[10px] font-medium text-text-muted">
-                            Partial scoring
-                          </span>
-                        )}
-                      </h3>
-                      <p className="text-[11px] text-text-muted">
-                        {selectedProblem.points} points · {selectedProblem.time_limit_ms}ms · {selectedProblem.memory_limit_mb}MB
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => navigate(`/questions/${selectedProblem.slug}`)}
-                      className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-accent hover:border-accent hover:bg-accent-subtle transition-colors"
-                    >
-                      <ExternalLink size={12} />
-                      Full Problem Statement
-                    </button>
-                  </div>
-                  <Button
-                    variant="primary"
-                    onClick={handleSubmit}
-                    disabled={submitting}
-                    className="flex items-center gap-2 text-xs"
-                  >
-                    {submitting ? (
-                      <><Loader2 size={14} className="animate-spin" /> Submitting...</>
-                    ) : selectedProblem.problem_type === "subjective" ? (
-                      <><Send size={14} /> Submit for review</>
-                    ) : (
-                      <><Send size={14} /> Submit</>
                     )}
-                  </Button>
-                </div>
-
-                {/* Submit result */}
-                {submitResult && (
-                  <div className={`mb-3 rounded-lg border p-3 text-sm ${
-                    submitResult.status === "accepted"
-                      ? "border-green-400/30 bg-green-400/10 text-green-400"
-                      : submitResult.status === "pending_review"
-                      ? "border-accent/30 bg-accent-subtle text-accent"
-                      : "border-red-400/30 bg-red-400/10 text-red-400"
-                  }`}>
-                    <div className="flex items-center gap-2">
-                      {submitResult.status === "accepted" ? (
-                        <CheckCircle size={16} />
-                      ) : submitResult.status === "pending_review" ? (
-                        <Hourglass size={16} />
-                      ) : (
-                        <XCircle size={16} />
-                      )}
-                      <span className="font-semibold capitalize">
-                        {submitResult.status === "pending_review"
-                          ? "Awaiting manual review"
-                          : submitResult.status.replace(/_/g, " ")}
+                    {p.scoring_mode === "partial" && (
+                      <span className="shrink-0 rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-[10px] font-medium text-text-muted">
+                        Partial scoring
                       </span>
-                      {submitResult.status !== "pending_review" && submitResult.total > 0 && (
-                        <span className="text-xs">
-                          ({submitResult.passed}/{submitResult.total} passed)
-                        </span>
-                      )}
-                    </div>
+                    )}
                   </div>
-                )}
-
-                <div className="overflow-hidden rounded-lg border border-border">
-                  <Editor
-                    height="400px"
-                    defaultLanguage="cpp"
-                    value={code}
-                    onChange={(v) => setCode(v || "")}
-                    theme="vs-dark"
-                    options={{
-                      minimap: { enabled: false },
-                      fontSize: 13,
-                      lineNumbers: "on",
-                      scrollBeyondLastLine: false,
-                      padding: { top: 12 },
-                    }}
-                  />
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold capitalize ${DIFFICULTY_BG[p.difficulty] || DIFFICULTY_BG.medium}`}>
+                      {p.difficulty}
+                    </span>
+                    <span className="text-xs font-bold text-accent">{p.points}pt</span>
+                  </div>
                 </div>
-              </Island>
-            </div>
-          )}
-
-          {selectedProblem && contest.status !== "live" && (
-            <div className="col-span-8">
-              <Island>
-                <div className="flex items-center justify-center py-12 text-text-muted">
-                  {contest.status === "upcoming"
-                    ? "Contest hasn't started yet. Come back when it's live!"
-                    : "This contest has ended. Submissions are closed."}
+                <div className="mt-1 text-[10px] text-text-muted">
+                  {p.time_limit_ms}ms · {p.memory_limit_mb}MB
                 </div>
-              </Island>
-            </div>
-          )}
-        </div>
+              </button>
+            ))}
+          </div>
+        </Island>
       )}
 
       {/* Leaderboard Tab */}

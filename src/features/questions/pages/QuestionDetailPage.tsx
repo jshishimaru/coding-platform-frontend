@@ -92,9 +92,11 @@ int main() {
 
 /* ─── Page Component ─── */
 export function QuestionDetailPage() {
-  const { slug } = useParams<{ slug: string }>();
+  const { slug, contestId } = useParams<{ slug: string; contestId?: string }>();
   const navigate = useNavigate();
   const editorRef = useRef<any>(null);
+  const isContestMode = Boolean(contestId);
+  const backPath = isContestMode ? `/contests/${contestId}` : "/questions";
 
   const [question, setQuestion] = useState<QuestionDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -112,12 +114,18 @@ export function QuestionDetailPage() {
   useEffect(() => {
     if (!slug) return;
     setLoading(true);
+    setJudgeResult(null);
+    setPendingReview(false);
+    setSelectedTC(0);
+    const detailPath = isContestMode
+      ? `/contests/${contestId}/problems/${slug}`
+      : `/questions/${slug}`;
     apiClient
-      .get<QuestionDetail>(`/questions/${slug}`)
+      .get<QuestionDetail>(detailPath)
       .then((q) => setQuestion(q))
-      .catch(() => navigate("/questions"))
+      .catch(() => navigate(backPath))
       .finally(() => setLoading(false));
-  }, [slug, navigate]);
+  }, [backPath, contestId, isContestMode, slug, navigate]);
 
   // Run sample tests
   const handleRun = async () => {
@@ -125,12 +133,16 @@ export function QuestionDetailPage() {
     setIsRunning(true);
     setJudgeResult(null);
     setResultTab("results");
+    const runPath = isContestMode
+      ? `/contests/${contestId}/problems/${slug}/run`
+      : `/questions/${slug}/run`;
     try {
-      const res = await apiClient.post<JudgeResult>(`/questions/${slug}/run`, {
+      const res = await apiClient.post<JudgeResult>(runPath, {
         code,
         language: "cpp",
       });
       setJudgeResult(res);
+      setSelectedTC(0);
       if (res.status === "compilation_error") setResultTab("compile");
     } catch (err: any) {
       setJudgeResult({
@@ -150,22 +162,23 @@ export function QuestionDetailPage() {
 
   // Submit code
   const handleSubmit = async () => {
-    if (!slug) return;
+    if (!slug || !question) return;
     setIsSubmitting(true);
     setJudgeResult(null);
     setPendingReview(false);
     setResultTab("results");
+    const submitPath = isContestMode ? `/contests/${contestId}/submit` : "/submissions";
+    const payload = isContestMode
+      ? { problem_id: question.id, code, language: "cpp" }
+      : { problem_slug: slug, code, language: "cpp" };
     try {
       const res = await apiClient.post<{
         result?: JudgeResult;
         submission: { status: string };
-      }>("/submissions", {
-        problem_slug: slug,
-        code,
-        language: "cpp",
-      });
+      }>(submitPath, payload);
       if (res.result) {
         setJudgeResult(res.result);
+        setSelectedTC(0);
         if (res.result.status === "compilation_error") setResultTab("compile");
       } else if (res.submission?.status === "pending_review") {
         setPendingReview(true);
@@ -206,7 +219,7 @@ export function QuestionDetailPage() {
       {/* ── Header Bar ── */}
       <div className="flex items-center justify-between rounded-xl border border-border bg-bg-secondary px-4 py-2 shadow-sm">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate("/questions")} className="text-text-muted hover:text-text transition-colors">
+          <button onClick={() => navigate(backPath)} className="text-text-muted hover:text-text transition-colors">
             <ArrowLeft size={18} />
           </button>
           <h1 className="text-sm font-semibold text-text">{question.title}</h1>

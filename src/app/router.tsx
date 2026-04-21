@@ -49,6 +49,10 @@ const router = createBrowserRouter([
             element: <ContestListPage />,
           },
           {
+            path: '/contests/:contestId/problems/:slug',
+            element: <QuestionDetailPage />,
+          },
+          {
             path: '/contests/:id',
             element: <ContestDetailPage />,
           },
