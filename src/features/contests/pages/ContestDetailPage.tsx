@@ -45,7 +45,7 @@ interface ContestDetail {
   start_time: string;
   end_time: string;
   is_rated: boolean;
-  status: "upcoming" | "live" | "ended";
+  status: "upcoming" | "live" | "ended" | "finalized";
   problems: ContestProblem[];
   group_id?: number | null;
   group_name?: string;
@@ -199,6 +199,8 @@ export function ContestDetailPage() {
     );
   }
 
+  const showRatingChange = contest.status === "ended" || contest.status === "finalized";
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -236,7 +238,7 @@ export function ContestDetailPage() {
           <div className={`text-2xl font-mono font-bold tabular-nums ${
             contest.status === "live" ? "text-green-400" : contest.status === "upcoming" ? "text-blue-400" : "text-text-muted"
           }`}>
-            {contest.status === "ended" ? "Ended" : countdown}
+            {contest.status === "finalized" ? "Finalized" : contest.status === "ended" ? "Ended" : countdown}
           </div>
           <div className="text-xs text-text-muted mt-1">
             {contest.status === "live" ? "Time remaining" : contest.status === "upcoming" ? "Starts in" : ""}
@@ -333,7 +335,7 @@ export function ContestDetailPage() {
                 <TableHead className="w-20">Score</TableHead>
                 <TableHead className="w-24">Penalty</TableHead>
                 <TableHead className="w-20">Rating</TableHead>
-                {contest.status === "ended" && (
+                {showRatingChange && (
                   <TableHead className="w-28">Rating Change</TableHead>
                 )}
                 {contest.problems.map((p) => (
@@ -346,7 +348,7 @@ export function ContestDetailPage() {
             <TableBody>
               {leaderboard.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5 + contest.problems.length} className="text-center py-8 text-sm text-text-muted">
+                  <TableCell colSpan={5 + (showRatingChange ? 1 : 0) + contest.problems.length} className="text-center py-8 text-sm text-text-muted">
                     No participants yet
                   </TableCell>
                 </TableRow>
@@ -365,7 +367,7 @@ export function ContestDetailPage() {
                   <TableCell className="font-mono text-sm font-bold text-accent">{entry.score}</TableCell>
                   <TableCell className="text-xs text-text-muted">{entry.penalty_time}min</TableCell>
                   <TableCell className="text-xs text-text-muted">{entry.rating}</TableCell>
-                  {contest.status === "ended" && (
+                  {showRatingChange && (
                     <TableCell className="text-xs">
                       {entry.rating_change != null ? (
                         <span className={entry.rating_change >= 0 ? "text-green-400" : "text-red-400"}>
